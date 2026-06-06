@@ -6,4 +6,4 @@ services:
     startCommand: python bot.py
     envVars:
             - key: ADMIN_NUM
-        value: 229XXXXXXXXX
+        value: 243896467916
