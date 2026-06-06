@@ -1,6 +1,5 @@
 const fs = require('fs')
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, delay, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
-const { Boom } = require('@hapi/boom')
 const pino = require('pino')
 const NodeCache = require('node-cache')
 
@@ -11,9 +10,9 @@ const PREFIX = '!'
 const AUTH_PATH = 'auth_info_baileys'
 const msgRetryCounterCache = new NodeCache({ stdTTL: 300, checkperiod: 320 })
 
-// SUPPRIME SESSION CORROMPUE AU DÉMARRAGE
+// Auto-clean session corrompue
 if (fs.existsSync(AUTH_PATH)) {
-    console.log('🗑️ Suppression ancienne session...')
+    console.log('🗑️ Nettoyage ancienne session...')
     fs.rmSync(AUTH_PATH, { recursive: true, force: true })
 }
 
@@ -23,36 +22,47 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }),
+        logger: pino({ level: 'warn' }),
         printQRInTerminal: false,
         auth: state,
         msgRetryCounterCache,
-        browser: ['Yuta Bot', 'Chrome', '1.0.0']
+        browser: ['Yuta Bot', 'Chrome', '1.0.0'],
+        connectTimeoutMs: 60000
     })
 
-    if (!sock.authState.creds.registered) {
-        await delay(5000)
+    let codeRequested = false
+
+    // Demande code seulement 1 fois
+    if (!sock.authState.creds.registered && !codeRequested) {
+        codeRequested = true
+        await delay(3000)
         console.log(`\n📱 Demande code SMS pour ${PHONE_NUM}...`)
-        const code = await sock.requestPairingCode(PHONE_NUM)
-        console.log('════════')
-        console.log('CODE A 8 CHIFFRES:', code)
-        console.log('════════')
+        try {
+            const code = await sock.requestPairingCode(PHONE_NUM)
+            console.log('═══════════════════════')
+            console.log('CODE A 8 CHIFFRES:', code)
+            console.log('═══════════════')
+            console.log('Va sur WhatsApp > Appareils liés > Lier avec code')
+        } catch(e) {
+            console.log('Erreur code:', e.message)
+        }
     }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update
+        console.log('Status:', connection)
+        
         if (connection === 'close') {
-            const statusCode = (lastDisconnect.error)?.output?.statusCode
-            console.log('Connexion fermée. Status:', statusCode)
+            const statusCode = lastDisconnect?.error?.output?.statusCode
+            console.log('Déconnecté. Code:', statusCode)
             
-            if (statusCode === DisconnectReason.loggedOut) {
-                console.log('Session expirée. Suppression auto au redémarrage.')
-                process.exit(1)
-            } else {
-                setTimeout(connectToWhatsApp, 5000)
-            }
-        } else if (connection === 'open') {
-            console.log('✅ Yuta Bot connecté!')
+            // NE JAMAIS EXIT - Render boucle sinon
+            console.log('Reconnexion dans 10s...')
+            setTimeout(connectToWhatsApp, 10000)
+        } 
+        else if (connection === 'open') {
+            console.log('✅ Yuta Bot connecté avec succès!')
+            codeRequested = false // reset pour future reco
         }
     })
 
@@ -64,13 +74,17 @@ async function connectToWhatsApp() {
         const body = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
         const sender = msg.key.remoteJid
         if (!body.startsWith(PREFIX)) return
-        const args = body.slice(PREFIX.length).trim().split(/ +/)
-        const cmd = args.shift().toLowerCase()
-
-        if(cmd === 'ping') await sock.sendMessage(sender, { text: 'Pong 🏓' })
-        if(cmd === 'help') await sock.sendMessage(sender, { text: `*YUTA BOT*\n${PREFIX}ping\n${PREFIX}help\nAdmin: +${ADMIN_NUM}` })
+        
+        const cmd = body.slice(PREFIX.length).trim().split(/ +/)[0].toLowerCase()
+        if(cmd === 'ping') await sock.sendMessage(sender, { text: 'Pong 🏓 Bot en ligne 24/7' })
+        if(cmd === 'help') await sock.sendMessage(sender, { text: `*YUTA BOT*\n!ping\n!help\n!tagadm\nAdmin: +${ADMIN_NUM}` })
         if(cmd === 'tagadm') await sock.sendMessage(sender, { text: `@${ADMIN_NUM}`, mentions: [`${ADMIN_NUM}@s.whatsapp.net`] })
     })
 }
 
 connectToWhatsApp()
+
+// KEEP ALIVE pour Render Free
+setInterval(() => {
+    console.log('Bot actif...')
+}, 300000) // ping toutes les 5min
