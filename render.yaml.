@@ -1,0 +1,9 @@
+services:
+    - type: web
+    name: bot-yuta
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+            - key: ADMIN_NUM
+        value: 243896467916
